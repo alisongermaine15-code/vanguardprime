@@ -30,7 +30,7 @@ const depositAssets={
   ETH:{symbol:"ETH",method:"Ethereum",name:"Ethereum",network:"Ethereum",address:process.env.ETH_DEPOSIT_ADDRESS||""},
   LTC:{symbol:"LTC",method:"Litecoin",name:"Litecoin",network:"Litecoin",address:process.env.LTC_DEPOSIT_ADDRESS||""}
 };
-function depositAsset(symbol){const asset=depositAssets[symbol];if(!asset)return null;const row=db.prepare("SELECT value FROM platform_settings WHERE key=?").get(`deposit_wallet_${symbol}`);return row?{...asset,...JSON.parse(row.value)}:{...asset}}
+function depositAsset(symbol){const asset=depositAssets[symbol];return asset?{...asset}:null}
 const supportedStockSymbols = new Set(["AAPL","AMZN","GOOGL","JNJ","JPM","META","MSFT","NFLX","NVDA","TSLA"]);
 const yearMs = 365.25 * 24 * 60 * 60 * 1000;
 const verificationCodeMinutes = 10;
@@ -616,20 +616,6 @@ async function api(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/wallet/transactions") {
     const user=requireUser(req,res);if(!user)return;const rows=db.prepare("SELECT public_id,type,direction,amount_cents,fee_cents,currency,method,reference,status,created_at FROM wallet_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 100").all(user.id);
     return json(res,200,{transactions:rows});
-  }
-  if(url.pathname==="/api/admin/deposit-wallets" && ["GET","POST"].includes(req.method)){
-    const admin=requireAdmin(req,res);if(!admin)return;
-    if(req.method==="GET")return json(res,200,{wallets:Object.keys(depositAssets).map(depositAsset)});
-    const input=await body(req),values=[];
-    for(const symbol of Object.keys(depositAssets)){
-      const value=input.wallets?.[symbol];
-      if(!value||typeof value.address!=="string"||typeof value.network!=="string")return json(res,422,{error:"Provide an address and network field for every currency."});
-      const address=value.address.trim(),network=value.network.trim();
-      if(address.length>200||/\s/.test(address)||!network||network.length>80)return json(res,422,{error:"Use an address without spaces (up to 200 characters) and a network name (up to 80 characters)."});
-      values.push([symbol,{address,network}]);
-    }
-    db.exec("BEGIN IMMEDIATE");try{const save=db.prepare("INSERT INTO platform_settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at");for(const [symbol,value] of values)save.run("deposit_wallet_"+symbol,JSON.stringify(value),now());db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
-    return json(res,200,{message:"Deposit wallets saved."});
   }
   if (req.method === "POST" && url.pathname === "/api/wallet/deposit-session") {
     const user=requireUser(req,res);if(!user)return;const input=await body(req),symbol=String(input.symbol||"").toUpperCase(),amount=cents(input.amount),asset=depositAsset(symbol);
